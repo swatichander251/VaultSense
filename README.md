@@ -1,111 +1,78 @@
-# VaultSense
+# VaultSense: runnable datathon starter
 
-**Vault Sense** is AI fraud detection that runs inside IBM Z's secure enclave. It scores every transaction in milliseconds and explains each alert, and customer data never leaves encrypted memory.
+This is a synthetic-data prototype, not a certified banking security product.
 
-## Project overview
+## Local quick start (Python 3.11+, Bash)
 
-- **Real-time scoring:** every transaction gets a fraud score within milliseconds.
-- **Explainable alerts:** each flagged transaction comes with the reasons it was flagged, so analysts can act quickly.
-- **Confidential by design:** the model runs inside IBM Z's secure enclave, so customer data stays in encrypted memory the whole time.
-
-## Team
-
-| GitHub | Role |
-| --- | --- |
-| [@swatichander251](https://github.com/swatichander251) | Repo owner |
-| [@silverND088](https://github.com/silverND088) | Collaborator |
-| [@bnigam21](https://github.com/bnigam21) | Collaborator |
-| [@afreenshaik77](https://github.com/afreenshaik77) | Collaborator |
-| [@nchouhan17](https://github.com/nchouhan17) | Collaborator |
-
-## Repository layout
-
-```
-VaultSense/
-├── src/              # Python source code
-├── notebooks/        # Jupyter notebooks for exploration and experiments
-├── data/             # Local datasets (git-ignored, never committed)
-├── requirements.txt  # Python dependencies
-└── README.md
-```
-
-## Getting started
-
-### 2. Set up the Python virtual environment
-
-**macOS / Linux**
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-```
+export VAULTSENSE_API_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')
+export VAULTSENSE_AUDIT_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')
+uvicorn app:app --host 127.0.0.1 --port 8080 --no-access-log
 
-**Windows (PowerShell)**
+Open http://localhost:8080. In another shell with the same API key:
 
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+curl http://localhost:8080/score -H "Authorization: Bearer $VAULTSENSE_API_KEY" -H 'Content-Type: application/json' -d '{"amount":1800,"hour":2,"international":1,"new_payee":1,"velocity_10m":18}'
 
-When you add a dependency, install it and then record it in `requirements.txt` with an exact version (e.g. `pandas==2.2.3`), and commit the change.
+The browser token stays in the page input, not localStorage. Use synthetic data only. Never expose the local HTTP server to public traffic.
 
-## Team server
+## IBM Cloud connection / deployment
 
-| | |
-| --- | --- |
-| Host | `148.100.109.192` |
-| Login | `ssh <your-username>@148.100.109.192` |
-| Shared project folder | `/srv/project` (a clone of this repo) |
-| Shared venv | `/srv/project/venv` |
+Prerequisites: IBM Cloud account, CLI installed, permissions and a resource group, billing approval as applicable. Run from the extracted project directory. These commands create potentially billable resources; they have NOT been run by this project author.
 
-- The server only accepts **SSH keys**, not passwords. Each teammate logs in with their own Linux account and the SSH key they sent to the admin.
-- Everyone on the team is in the `team` group, which can read and write `/srv/project`.
-- If your private key isn't in the default location, use `ssh -i ~/.ssh/<your-key> <your-username>@148.100.109.192`.
+ibmcloud login
+ibmcloud target -r us-south -g YOUR_RESOURCE_GROUP
+ibmcloud plugin install code-engine
+ibmcloud ce project create --name vaultsense-demo
+ibmcloud ce project select --name vaultsense-demo
 
-Optional shortcut: add this to `~/.ssh/config` on your laptop, then just run `ssh vaultsense`:
+Generate the two secrets as in local quick start, then:
 
-```
-Host vaultsense
-    HostName 148.100.109.192
-    User <your-username>
-    IdentityFile ~/.ssh/<your-key>
-```
+ibmcloud ce secret create --name vaultsense-secrets --from-literal VAULTSENSE_API_KEY="$VAULTSENSE_API_KEY" --from-literal VAULTSENSE_AUDIT_KEY="$VAULTSENSE_AUDIT_KEY"
+ibmcloud ce application create --name vaultsense --build-source . --build-strategy dockerfile --port 8080 --env-from-secret vaultsense-secrets --min-scale 1 --max-scale 1
+ibmcloud ce application get --name vaultsense
 
-### Using the shared venv on the server
+Use the HTTPS application URL printed by IBM Cloud. The UI and /score endpoint are on this server. Do not place an IBM Cloud IAM key in the UI. The application bearer token is separate from the IBM Cloud login. Secret values passed on the command line may be visible to local privileged users; use a trusted workstation. For production use managed identity, per-bank authorization, rate limits and managed secret rotation.
 
-```bash
-cd /srv/project
-source venv/bin/activate
-pip install -r requirements.txt
-```
+Code Engine is the functional demo host, NOT evidence of IBM Z Secure Execution. A successful deployment does not verify confidential computing. Minimum scale one reduces cold starts but can incur continuous charges. Audit records are ephemeral and reset on restart; max scale one does not make them durable.
 
-## Workflow
+## Training and datasets
 
-**Write code on your laptop, push it to GitHub, then `git pull` on the server.**
+The included model is trained with pure-Python stochastic-gradient logistic regression on 7,000 generated synthetic records. Run python train.py to reproduce. The test split contains 1,400 records. Read evaluation.json: recall is low at the illustrative 0.25 threshold. This is an honest baseline, not a competitive fraud detector. Threshold selection should use a separate validation set, then evaluate on a held-out chronological test set. Report PR-AUC, recall at a fixed false-positive rate, cost-weighted errors and measured p50/p95/p99 end-to-end latency.
 
-1. **On your laptop:** get the latest code, then make your changes.
-   ```bash
-   git pull
-   # ...edit code...
-   git add <files>
-   git commit -m "Describe your change"
-   git push
-   ```
-2. **On the server:** update the shared copy and run it.
-   ```bash
-   ssh <your-username>@148.100.109.192
-   cd /srv/project
-   git pull
-   source venv/bin/activate
-   pip install -r requirements.txt   # only if dependencies changed
-   ```
+To bring your own dataset:
+python train.py --csv normalized.csv
 
-Ground rules:
+Required numeric CSV columns: amount,hour,international,new_payee,velocity_10m,age,is_fraud
+Use amount in consistent monetary units; hour 0-23; binary values 0/1; age for evaluation only. Define velocity_10m as a count calculated using only earlier events for the same pseudonymous account. Do NOT invent unavailable attributes or derive them using future transactions. This starter does not include adapters or download TabFormer, ULB, PaySim or BAF. ULB's anonymized features do not directly fit this schema: use a separate feature pipeline/model. Age and income are not accepted by /score. Income fairness evaluation is not implemented. Synthetic age groups do not validate fairness on real populations. Differences in subgroup rates require sample-size/uncertainty analysis and legal review.
 
-- **Don't edit code directly in `/srv/project`.** The server copy only pulls from GitHub, and its deploy key is read-only, so it can't push.
-- **Never commit data or secrets.** `data/`, `.env`, `venv/`, `*.pem` and SSH keys are already git-ignored. Keep datasets in `data/` on your laptop or on the server.
-- Pull before you start work and push often, so you run into fewer merge conflicts.
+## What the API does
+
+GET / : demo form
+GET /health : explicitly states hardware protection is not verified
+POST /score : authenticated score, threshold decision, exact additive log-odds contributions, inference-only elapsed milliseconds
+GET /audit : authenticated last 1,000 volatile HMAC-linked event records
+
+No full transaction features are intentionally written by the app to disk or audit records. Pydantic error responses can include invalid submitted values; use only synthetic input, suppress/transform validation detail before production, and review ingress and platform logs. Response data and alert metadata remain sensitive. Python does not guarantee memory zeroization; no code-only claim of encrypted memory is made. No TLS or attestation is implemented by the app; use the cloud HTTPS endpoint for this demo.
+
+The HMAC chain can detect some changes only when a verifier has a trusted prior checkpoint and the secret remains secure. A privileged holder of the audit key can rewrite it. It is NOT tamper-proof, immutable storage, hardware attestation or proof that data was never exposed. Do not use the single shared demo key across multiple banks.
+
+## IBM Z / LinuxONE confidential deployment: separate next stage
+
+Use the same API application in an IBM Secure Execution-enabled guest on supported IBM Z/LinuxONE infrastructure, with IBM's supported confidential-container tooling. Build an s390x-compatible image and validate dependencies. Example build only:
+docker buildx build --platform linux/s390x -t YOUR_REGISTRY/vaultsense:z-demo --push .
+
+An s390x image alone does not enable confidential computing. Obtain the supported platform from your datathon organizer/IBM. Configure encrypted deployment contracts, workload integrity verification/attestation, protected keys, TLS termination inside the protected boundary, protected storage, disabled swap/core dumps as appropriate, and restricted ingress/egress. Keep training, feature engineering and inference within the approved boundary if they handle real bank data. The health endpoint deliberately remains false until an actual verification mechanism is implemented; never replace verification with an environment flag.
+
+IBM Cloud Hyper Protect Virtual Servers for VPC is deprecated: no new instances after 28 February 2026; existing instances supported until 20 February 2027. Do not plan a new deployment around that service. IBM Confidential Computing Container Runtime / Platform on supported infrastructure is a separate deployment route to discuss with IBM.
+
+No federated learning, secure aggregation, differential privacy, regulator access, customer notifications or real banking integration is implemented. Sharing model updates is not automatically private. Add these only with an explicit threat model and privacy controls. Alert explanations are predictive, not proof of fairness or causation; compliance needs jurisdiction-specific assessment.
+
+## Official documentation
+
+https://cloud.ibm.com/docs/codeengine?topic=codeengine-cli
+https://cloud.ibm.com/docs/codeengine?topic=codeengine-secret
+https://www.ibm.com/products/confidential-computing-container-runtime
+https://www.ibm.com/docs/en/linux-on-systems?topic=execution-introduction
+https://cloud.ibm.com/docs/vpc?topic=vpc-financial-transaction-confidential-computing-on-hyper-protect-virtual-server-for-vpc

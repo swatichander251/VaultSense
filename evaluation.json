@@ -1,0 +1,24 @@
+{
+  "test": {
+    "n": 1400,
+    "fraud_count": 52,
+    "precision": 0.5,
+    "recall": 0.15384615384615385,
+    "false_positive_rate": 0.005934718100890208
+  },
+  "under_60": {
+    "n": 810,
+    "fraud_count": 30,
+    "precision": 0.45454545454545453,
+    "recall": 0.16666666666666666,
+    "false_positive_rate": 0.007692307692307693
+  },
+  "age_60_plus": {
+    "n": 590,
+    "fraud_count": 22,
+    "precision": 0.6,
+    "recall": 0.13636363636363635,
+    "false_positive_rate": 0.0035211267605633804
+  },
+  "note": "Synthetic random-split demonstration, not deployment validation. Age is excluded from scoring. Threshold is illustrative, not tuned."
+}

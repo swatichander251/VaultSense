@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>VaultSense demo</title>
+<style>body{font:17px system-ui;max-width:850px;margin:40px auto;padding:20px;background:#101b2d;color:#edf4ff}input,button{padding:10px;margin:8px}pre{white-space:pre-wrap;background:#1d2c43;padding:20px}label{display:block}</style>
+<h1>VaultSense</h1><p>Synthetic-data fraud detection demo. Hardware privacy protection is not verified.</p>
+<label>API token <input id="key" type="password" autocomplete="off"></label>
+<label>Amount <input id="amount" type="number" value="1800"></label>
+<label>Hour (0–23) <input id="hour" type="number" value="2"></label>
+<label>Transactions in last 10 minutes <input id="velocity" type="number" value="18"></label>
+<label><input id="international" type="checkbox" checked>International</label>
+<label><input id="payee" type="checkbox" checked>New payee</label>
+<button id="score">Score synthetic transaction</button><pre id="result">Ready</pre>
+<script>document.getElementById('score').onclick=async()=>{const v=id=>document.getElementById(id);try{const r=await fetch('/score',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+v('key').value},body:JSON.stringify({amount:Number(v('amount').value),hour:Number(v('hour').value),velocity_10m:Number(v('velocity').value),international:Number(v('international').checked),new_payee:Number(v('payee').checked)})});v('result').textContent=JSON.stringify(await r.json(),null,2)}catch(e){v('result').textContent=String(e)}};</script></html>
