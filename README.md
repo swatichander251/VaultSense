@@ -31,17 +31,6 @@ VaultSense/
 
 ## Getting started
 
-### 1. Accept the invite and clone
-
-First accept the collaborator invitation from your GitHub email, or at https://github.com/swatichander251/VaultSense/invitations.
-
-```bash
-git clone https://github.com/swatichander251/VaultSense.git
-cd VaultSense
-```
-
-The repo is private. If git asks for a password, sign in with the GitHub CLI (`gh auth login`) or use a personal access token. Your GitHub account password won't work.
-
 ### 2. Set up the Python virtual environment
 
 **macOS / Linux**
