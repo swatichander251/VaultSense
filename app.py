@@ -13,7 +13,8 @@ import httpx
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -194,9 +195,30 @@ class SessionRef(BaseModel):
 
 
 # ---------------------------------------------------------------- routes
-@app.get("/")
-def index():
-    return FileResponse(BASE_DIR / "index.html")
+STATIC = BASE_DIR / "static"
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
+PAGES = {"/": "index.html", "/login": "login.html", "/dashboard": "dashboard.html",
+         "/assistant": "assistant.html", "/security": "security.html", "/lab": "lab.html"}
+
+
+def _page(name):
+    def handler():
+        return FileResponse(STATIC / name, headers={"Cache-Control": "no-cache"})
+    return handler
+
+
+for _path, _file in PAGES.items():
+    app.add_api_route(_path, _page(_file), methods=["GET"], include_in_schema=False)
+
+
+@app.get("/config.js", include_in_schema=False)
+def frontend_config():
+    """Public settings for the website. The anon key is designed to be public (Row Level Security
+    protects the data); the service_role key is never sent."""
+    cfg = {"supabaseUrl": SUPABASE_URL, "supabaseAnonKey": SUPABASE_ANON_KEY,
+           "guardOffAllowed": DEMO_ALLOW_GUARD_OFF}
+    return Response("window.VS_CONFIG = " + json.dumps(cfg) + ";", media_type="application/javascript",
+                    headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/health")
@@ -384,3 +406,85 @@ def research_results(caller: dict = Depends(authorize)):
             except ValueError:
                 out[name] = {"error": "unreadable"}
     return out
+
+
+
+# ---------------------------------------------------------------- public demo (home page, synthetic data only)
+_rate = {}
+_rate_lock = threading.Lock()
+
+
+def _client_ip(request: Request):
+    fwd = request.headers.get("x-forwarded-for", "")
+    return (fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "unknown"))[:64]
+
+
+def rate_limit(bucket, per_minute):
+    def dep(request: Request):
+        now = time.time()
+        key = (bucket, _client_ip(request))
+        with _rate_lock:
+            if len(_rate) > 20000:
+                _rate.clear()
+            hits = [t for t in _rate.get(key, []) if now - t < 60]
+            if len(hits) >= per_minute:
+                raise HTTPException(status_code=429, detail="Too many requests, please wait a minute")
+            hits.append(now)
+            _rate[key] = hits
+    return dep
+
+
+def _demo_caller(request: Request):
+    # A separate namespace per visitor: demo sessions only ever touch synthetic in-memory accounts.
+    ip_hash = hashlib.sha256(_client_ip(request).encode()).hexdigest()[:12]
+    return {"kind": "demo", "user_id": None, "token": None, "ns": f"demo-{ip_hash}"}
+
+
+@app.post("/demo/chat", dependencies=[Depends(rate_limit("demo_chat", 30))])
+async def demo_chat(req: ChatRequest, request: Request):
+    """Public home-page demo: same guard and chatbot, synthetic accounts, no login."""
+    if not req.guard_enabled and not DEMO_ALLOW_GUARD_OFF:
+        raise HTTPException(status_code=403, detail="Guard-off demo is disabled on this server")
+    return await request.app.state.bot.handle(_demo_caller(request), req.session_id, req.message, None, req.guard_enabled)
+
+
+@app.post("/demo/chat/confirm", dependencies=[Depends(rate_limit("demo_chat", 30))])
+async def demo_chat_confirm(req: ConfirmRequest, request: Request):
+    return await request.app.state.bot.confirm(_demo_caller(request), req.session_id, req.pending_id, None)
+
+
+_SIM_ATTACKS = None
+
+
+def _sim_attacks():
+    global _SIM_ATTACKS
+    if _SIM_ATTACKS is None:
+        out = []
+        for f in ("guard_eval_data.json", "guard_holdout_data.json"):
+            d = json.loads((BASE_DIR / f).read_text())
+            out += [(t, "user") for t in d["user_attacks"]] + [(t, "retrieved") for t in d["retrieved_attacks"]]
+        _SIM_ATTACKS = out[:50]
+    return _SIM_ATTACKS
+
+
+@app.post("/demo/simulate", dependencies=[Depends(rate_limit("demo_sim", 3))])
+async def demo_simulate(request: Request):
+    """Fire 50 known prompt-injection attempts (our test set) through the guard."""
+    import asyncio
+    results, logs = [], []
+    caller = _demo_caller(request)
+    for text, source in _sim_attacks():
+        r = guard.screen_input(text, source)
+        rules = [f["rule"] for f in r["findings"]]
+        results.append({"text": text[:140], "source": source, "decision": r["decision"],
+                        "risk": r["risk_score"], "top_rule": rules[0] if rules else None})
+        event_id = _audit("simulator", caller, decision=r["decision"], risk=r["risk_score"], rules=rules)
+        logs.append(request.app.state.supa.log_guard_event({
+            "user_id": None, "session_hash": "simulator", "layer": "input", "source": "simulator",
+            "decision": r["decision"], "risk_score": r["risk_score"], "rules": rules, "event_id": event_id}))
+    await asyncio.gather(*logs)
+    blocked = sum(r["decision"] == "block" for r in results)
+    review = sum(r["decision"] == "review" for r in results)
+    return {"total": len(results), "blocked": blocked, "review": review,
+            "missed": len(results) - blocked - review, "results": results,
+            "note": "These are VaultSense's own test attacks; real attackers will be more varied."}

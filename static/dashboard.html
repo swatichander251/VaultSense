@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dashboard · VaultSense</title>
+<link rel="stylesheet" href="/static/css/vs.css">
+<script src="/config.js"></script>
+<script src="/static/vendor/supabase.js"></script>
+<script src="/static/js/common.js"></script>
+</head>
+<body>
+<header class="topbar" id="topbar"></header>
+<main class="page wrap">
+  <section class="hero" style="margin-bottom:28px">
+    <div><div class="label">Comets UTD Bank</div><h1 style="font-size:34px;margin-top:8px" id="hello">Your accounts</h1>
+      <p>Every request your assistant handles is checked by VaultSense.</p></div>
+    <a class="btn btn-primary" href="/assistant">Open assistant</a>
+  </section>
+  <div id="alert"></div>
+  <section class="grid g3" id="accounts" style="margin-bottom:18px"></section>
+  <section class="grid g-chat">
+    <div class="card">
+      <div class="card-head"><div style="flex:1;font-weight:600">Recent transactions</div><span class="muted" style="font-size:13px">Flagged by the fraud model in red</span></div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Merchant</th><th>Category</th><th style="text-align:right">Amount</th><th>Risk</th></tr></thead><tbody id="tx"></tbody></table></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div style="flex:1;font-weight:600">Cards</div></div>
+      <div id="cards"></div>
+    </div>
+  </section>
+</main>
+<script>
+(async () => {
+  const { sb, el, money } = VS;
+  const $ = id => document.getElementById(id);
+  const s = await VS.requireUser();
+  await VS.header("/dashboard");
+  const fail = (what, err) => $("alert").append(el("div", { class: "alert err" }, "Couldn't load " + what + ": " + err.message));
+
+  const name = (s.user.user_metadata && s.user.user_metadata.full_name) || "";
+  if (name) $("hello").textContent = "Welcome, " + name.split(" ")[0];
+
+  const acc = await sb.from("accounts").select("kind,nickname,balance").order("kind");
+  if (acc.error) fail("accounts", acc.error);
+  const rows = acc.data || [];
+  const total = rows.reduce((t, a) => t + Number(a.balance), 0);
+  $("accounts").replaceChildren(
+    ...rows.map(a => el("div", { class: "card acct" }, el("div", { class: "label" }, a.kind), el("div", { class: "muted", style: "font-size:13px;margin-top:4px" }, a.nickname || ""),
+      el("div", { class: "amt" }, money(a.balance)))),
+    el("div", { class: "card acct" }, el("div", { class: "label" }, "Total"), el("div", { class: "muted", style: "font-size:13px;margin-top:4px" }, rows.length + " accounts"),
+      el("div", { class: "amt" }, money(total))));
+  if (!rows.length && !acc.error) $("accounts").replaceChildren(el("div", { class: "card card-pad muted" }, "No accounts yet. Run supabase_migration_2_chatbot.sql to create demo accounts."));
+
+  const tx = await sb.from("transactions").select("created_at,merchant,category,amount,flagged,fraud_score").order("created_at", { ascending: false }).limit(25);
+  if (tx.error) fail("transactions", tx.error);
+  const txRows = tx.data || [];
+  $("tx").replaceChildren(...(txRows.length ? txRows.map(t => el("tr", { class: t.flagged ? "flag" : null },
+    el("td", { class: "muted" }, new Date(t.created_at).toLocaleDateString()), el("td", {}, t.merchant || "—"), el("td", { class: "muted" }, t.category || "—"),
+    el("td", { class: "num", style: "text-align:right" }, money(t.amount)),
+    el("td", {}, t.fraud_score == null ? el("span", { class: "faint" }, "—") :
+      el("span", { class: "badge " + (t.flagged ? "red" : "green") }, (t.flagged ? "Flagged " : "OK ") + Math.round(100 * t.fraud_score)))))
+    : [el("tr", {}, el("td", { colspan: "5", class: "empty" }, "No transactions yet. Try a transfer in the assistant."))]));
+
+  const cards = await sb.from("cards").select("brand,last4,exp_month,exp_year,nickname,frozen");
+  if (cards.error) fail("cards", cards.error);
+  const cRows = cards.data || [];
+  $("cards").replaceChildren(...(cRows.length ? cRows.map(c => el("div", { class: "feed-row", style: "cursor:default" },
+    el("div", { class: "risk ok", style: "width:52px" }, el("b", {}, c.brand ? c.brand.slice(0, 4).toUpperCase() : "CARD")),
+    el("div", { style: "flex:1" }, el("div", { class: "feed-title" }, "•••• " + c.last4), el("div", { class: "feed-sub" }, (c.nickname || "") + (c.exp_month ? " exp " + c.exp_month + "/" + c.exp_year : ""))),
+    el("span", { class: "badge " + (c.frozen ? "red" : "green") }, c.frozen ? "Frozen" : "Active")))
+    : [el("div", { class: "empty" }, "No cards on file.")]));
+})();
+</script>
+</body>
+</html>

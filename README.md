@@ -40,6 +40,20 @@ To keep it running after you log out, use `tmux`/`screen`, or a systemd service.
 See **CHATBOT_GUARD.md** for the threats covered, the integration flow, a system-prompt template and
 honest evaluation results (`python guard_eval.py --show`).
 
+## Website (served by the API, no Lovable needed)
+
+| Page | What it does |
+|---|---|
+| `/` | Public home page: live demo chatbot with protection on/off, live threat feed, 50-attack simulator, same-prompt comparison. Synthetic data only, rate-limited (`/demo/*` endpoints). |
+| `/login` | Supabase sign up / log in |
+| `/dashboard` | The user's accounts, cards and transactions (read with their own login, Row Level Security) |
+| `/assistant` | Bank assistant behind the guard; transfers need the Confirm button |
+| `/security` | Admin-only threat dashboard from `guard_events` |
+| `/lab` | Old API-key demo page |
+
+The browser only ever gets the Supabase **anon** key (`/config.js`); the service_role key stays on the server.
+In Supabase → Authentication → URL Configuration, set the Site URL to your HTTPS address.
+
 ## Real datasets (IBM TabFormer, ULB, PaySim, BAF) and simulated banks
 
 **DATA_RUNBOOK.md** has every command, in order, to run on the server:

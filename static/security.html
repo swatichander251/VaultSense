@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Security · VaultSense</title>
+<link rel="stylesheet" href="/static/css/vs.css">
+<script src="/config.js"></script>
+<script src="/static/vendor/supabase.js"></script>
+<script src="/static/js/common.js"></script>
+</head>
+<body>
+<header class="topbar" id="topbar"></header>
+<main class="page wrap">
+  <div id="denied" class="card card-pad hidden" style="max-width:520px;margin:40px auto;text-align:center">
+    <h2>You don't have access to this page</h2>
+    <p class="muted">The security dashboard is only for security admins.</p>
+  </div>
+  <div id="content" class="hidden">
+    <section class="hero" style="margin-bottom:28px">
+      <div><div class="label">Security operations</div><h1 style="font-size:34px;margin-top:8px">Threat dashboard</h1>
+        <p>Every check VaultSense ran on the chatbot. Metadata only, never message text.</p></div>
+      <div style="text-align:right"><button class="btn" id="refresh">Refresh</button><div class="faint" style="font-size:12px;margin-top:8px" id="updated"></div></div>
+    </section>
+    <section class="grid g4" style="margin-bottom:18px">
+      <div class="card stat"><div class="stat-body"><span class="label">Total checks · 7d</span><div class="stat-value num" id="sTotal">–</div></div></div>
+      <div class="card stat"><div class="stat-body"><span class="label" style="color:var(--red)">Blocked · 7d</span><div class="stat-value num" id="sBlocked">–</div></div></div>
+      <div class="card stat"><div class="stat-body"><span class="label" style="color:var(--amber)">Needs review · 7d</span><div class="stat-value num" id="sReview">–</div></div></div>
+      <div class="card stat"><div class="stat-body"><span class="label" style="color:var(--blue-text)">Redacted replies · 7d</span><div class="stat-value num" id="sRedact">–</div></div></div>
+    </section>
+    <section class="grid g-2" style="margin-bottom:18px">
+      <div class="card">
+        <div class="card-head"><div style="flex:1;font-weight:600">Checks per day · last 14 days</div></div>
+        <div class="legend" style="padding-top:14px"><span><i style="background:#2f7a4c"></i>Allowed</span><span><i style="background:#a0781c"></i>Review / redact</span><span><i style="background:#b33a3a"></i>Blocked / denied</span></div>
+        <div class="chart" id="daily"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div style="flex:1;font-weight:600">Top attack types</div></div>
+        <div id="rules" style="padding:10px 0"></div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="card-head"><div style="flex:1;font-weight:600">Recent threats</div><span class="muted" style="font-size:13px">Newest first · 50 most recent</span></div>
+      <div class="table-wrap" style="max-height:620px;overflow-y:auto"><table class="table"><thead><tr><th>Time</th><th>Layer</th><th>Source</th><th>Decision</th><th>Risk</th><th>Signals</th><th>Session</th></tr></thead><tbody id="threats"></tbody></table></div>
+    </section>
+  </div>
+</main>
+<script>
+(async () => {
+  const { sb, el, ruleName, decisionClass } = VS;
+  const $ = id => document.getElementById(id);
+  await VS.requireUser();
+  const h = await VS.header("/security");
+  if (!h.admin) { $("denied").classList.remove("hidden"); return; }
+  $("content").classList.remove("hidden");
+
+  const BLOCK = ["block", "deny"], REVIEW = ["review", "human_review", "require_confirmation"];
+  const bucket = d => BLOCK.includes(d) ? "bad" : (REVIEW.includes(d) || d === "redact") ? "warn" : "ok";
+  const COLORS = { ok: "#2f7a4c", warn: "#a0781c", bad: "#b33a3a" };
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = (tag, attrs, text) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (text != null) n.textContent = text; return n; };
+
+  async function count(filter) {
+    const since = new Date(Date.now() - 7 * 864e5).toISOString();
+    let q = sb.from("guard_events").select("id", { count: "exact", head: true }).gte("created_at", since);
+    if (filter) q = q.in("decision", filter);
+    const { count: c, error } = await q;
+    return error ? "!" : c;
+  }
+
+  function drawDaily(rows) {
+    const days = [];
+    for (let i = 13; i >= 0; i--) { const d = new Date(Date.now() - i * 864e5); days.push(d.toISOString().slice(0, 10)); }
+    const agg = Object.fromEntries(days.map(d => [d, { ok: 0, warn: 0, bad: 0 }]));
+    for (const r of rows) { const d = String(r.day).slice(0, 10); if (agg[d]) agg[d][bucket(r.decision)] += Number(r.events); }
+    const max = Math.max(1, ...days.map(d => agg[d].ok + agg[d].warn + agg[d].bad));
+    const W = 520, H = 220, pad = 28, bw = (W - pad) / days.length - 6;
+    const s = svg("svg", { viewBox: `0 0 ${W} ${H + 24}`, width: "100%", role: "img", "aria-label": "Checks per day by outcome" });
+    s.append(svg("line", { x1: pad, x2: W, y1: H, y2: H, stroke: "#2c323b" }));
+    s.append(svg("text", { x: 0, y: 12, fill: "#6b7380", "font-size": 11 }, String(max)));
+    days.forEach((d, i) => {
+      let y = H; const x = pad + i * ((W - pad) / days.length) + 3;
+      for (const k of ["ok", "warn", "bad"]) {
+        const h = agg[d][k] / max * (H - 16); if (!h) continue;
+        const rect = svg("rect", { x, y: y - h, width: bw, height: h, fill: COLORS[k], rx: 2 });
+        rect.append(svg("title", {}, `${d}: ${agg[d][k]} ${k === "ok" ? "allowed" : k === "warn" ? "review/redact" : "blocked"}`));
+        s.append(rect); y -= h;
+      }
+      if (i % 2 === 0) s.append(svg("text", { x: x + bw / 2, y: H + 16, fill: "#6b7380", "font-size": 10, "text-anchor": "middle" }, d.slice(5)));
+    });
+    $("daily").replaceChildren(s);
+  }
+
+  function drawRules(rows) {
+    const merged = {};
+    for (const r of rows) { const n = ruleName(r.rule); merged[n] = (merged[n] || 0) + Number(r.hits); }
+    const top = Object.entries(merged).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const max = Math.max(1, ...top.map(t => t[1]));
+    $("rules").replaceChildren(...(top.length ? top.map(([n, c]) => el("div", { class: "hbar" }, el("span", {}, n),
+      el("div", { class: "track" }, el("div", { class: "fill", style: `width:${100 * c / max}%` })), el("span", { class: "num muted", style: "text-align:right" }, String(c))))
+      : [el("div", { class: "empty" }, "No attacks recorded yet. Try the attack simulator on the home page.")]));
+  }
+
+  function drawThreats(rows) {
+    $("threats").replaceChildren(...(rows.length ? rows.map(r => el("tr", {},
+      el("td", { class: "muted", style: "white-space:nowrap" }, new Date(r.created_at).toLocaleString()),
+      el("td", {}, r.layer), el("td", { class: "muted" }, r.source || "—"),
+      el("td", {}, el("span", { class: "chip " + decisionClass(r.decision) }, r.decision)),
+      el("td", {}, r.risk_score == null ? el("span", { class: "faint" }, "—") : el("div", { style: "display:flex;gap:8px;align-items:center" },
+        el("div", { class: "bar" }, el("i", { style: `width:${Math.round(100 * r.risk_score)}%` })), el("span", { class: "num muted", style: "font-size:12px" }, Number(r.risk_score).toFixed(2)))),
+      el("td", {}, el("div", { class: "chips" }, [...new Set((r.rules || []).map(ruleName))].slice(0, 4).map(n => el("span", { class: "chip" }, n)))),
+      el("td", { class: "mono faint", style: "font-size:12px" }, r.session_hash || "—")))
+      : [el("tr", {}, el("td", { colspan: "7", class: "empty" }, "No threats yet."))]));
+  }
+
+  async function load() {
+    const since14 = new Date(Date.now() - 14 * 864e5).toISOString();
+    const [total, blocked, review, redact, daily, rules, threats] = await Promise.all([
+      count(null), count(BLOCK), count(REVIEW), count(["redact"]),
+      sb.from("guard_daily").select("day,layer,decision,events").gte("day", since14),
+      sb.from("guard_top_rules").select("rule,hits,last_seen").order("hits", { ascending: false }).limit(40),
+      sb.from("guard_recent_threats").select("*").limit(50)]);
+    $("sTotal").textContent = total; $("sBlocked").textContent = blocked; $("sReview").textContent = review; $("sRedact").textContent = redact;
+    drawDaily(daily.data || []); drawRules(rules.data || []); drawThreats(threats.data || []);
+    $("updated").textContent = "Updated " + new Date().toLocaleTimeString() + " · refreshes every 30 s";
+  }
+  $("refresh").onclick = load;
+  await load();
+  setInterval(load, 30000);
+})();
+</script>
+</body>
+</html>

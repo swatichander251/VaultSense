@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Assistant · VaultSense</title>
+<link rel="stylesheet" href="/static/css/vs.css">
+<script src="/config.js"></script>
+<script src="/static/vendor/supabase.js"></script>
+<script src="/static/js/common.js"></script>
+</head>
+<body>
+<header class="topbar" id="topbar"></header>
+<main class="page wrap">
+  <section class="grid g-chat">
+    <div class="card">
+      <div class="card-head">
+        <div class="brand-mark" style="width:40px;height:40px;border-radius:50%;font-weight:700">N</div>
+        <div style="flex:1"><div style="font-weight:600">Comets UTD Bank assistant</div><div class="muted" style="font-size:13px">Signed in · your real demo accounts</div></div>
+        <span class="badge blue" id="shield"></span>
+        <button class="btn btn-sm" id="newChat">New chat</button>
+      </div>
+      <div class="chat-log" id="log" aria-live="polite" style="height:480px"></div>
+      <div class="chat-foot">
+        <div class="chips" id="suggest"></div>
+        <form class="chat-input" id="form"><input class="input" id="msg" placeholder="Ask about balances, transfers, cards…" autocomplete="off" maxlength="2000"><button class="send" id="send" aria-label="Send"></button></form>
+      </div>
+    </div>
+    <div class="grid" style="align-content:start">
+      <div class="card">
+        <div class="card-head"><div style="flex:1;font-weight:600">Balances</div><button class="btn btn-sm" id="refresh">Refresh</button></div>
+        <div id="balances" style="padding:8px 0"></div>
+      </div>
+      <div class="card card-pad" style="font-size:13.5px">
+        <div class="label" style="margin-bottom:10px">Reading the chips</div>
+        <div class="chips" style="margin-bottom:10px"><span class="chip allow">allow</span><span class="chip warn">review / confirm</span><span class="chip bad">block / deny</span></div>
+        <p class="muted" style="margin:0">Each chip is one VaultSense check: your message, any document the assistant read, every action it tried, and its reply. Hover a chip to see why.</p>
+        <p class="muted" style="margin:10px 0 0">Transfers and new payees only happen when you press Confirm. The assistant can't press it.</p>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+(async () => {
+  const API_URL = location.origin;   // the VaultSense API serves this page, so it's the same address
+  const { sb, el, ICONS, guardChips, money, newId } = VS;
+  const $ = id => document.getElementById(id);
+  await VS.requireUser();
+  await VS.header("/assistant");
+  $("send").innerHTML = ICONS.send;
+  $("shield").innerHTML = ICONS.shieldSm; $("shield").append(" Protected by VaultSense Guard");
+
+  let sid = newId();
+  const log = $("log");
+  const scroll = () => { log.scrollTop = 1e9; };
+  const bot = (text, cls) => { log.append(el("div", { class: "msg-row" }, el("div", { class: "msg-ico", html: ICONS.bot }), el("div", { class: "msg " + (cls || "") }, text))); scroll(); };
+  const me = text => { log.append(el("div", { class: "msg-row me" }, el("div", { class: "msg" }, text))); scroll(); };
+  const greet = () => bot("Hi! I can check balances and recent transactions, freeze a card, add a payee, or move money. What do you need?");
+  greet();
+
+  async function loadBalances() {
+    const { data, error } = await sb.from("accounts").select("kind,nickname,balance").order("kind");
+    $("balances").replaceChildren(...(error ? [el("div", { class: "empty" }, "Couldn't load balances.")] :
+      (data || []).map(a => el("div", { class: "feed-row", style: "cursor:default" },
+        el("div", { style: "flex:1" }, el("div", { class: "label" }, a.kind), el("div", { class: "feed-sub" }, a.nickname || "")),
+        el("div", { class: "num", style: "font-size:20px;font-weight:600" }, money(a.balance))))));
+  }
+  $("refresh").onclick = loadBalances;
+  loadBalances();
+
+  async function post(path, body) {
+    const s = await VS.session();
+    if (!s) { location.href = "/login?next=/assistant"; return; }
+    let r;
+    try {
+      r = await fetch(API_URL + path, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + s.access_token },
+                                        body: JSON.stringify(body) });
+    } catch (e) { throw new Error("The VaultSense assistant is unreachable right now. Please try again in a moment."); }
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401) { location.href = "/login?next=/assistant"; return; }
+    if (!r.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Something went wrong (" + r.status + ").");
+    return data;
+  }
+
+  async function send(text) {
+    text = text.trim(); if (!text) return;
+    me(text); $("msg").value = "";
+    const typing = el("div", { class: "typing" }, "Assistant is typing…"); log.append(typing); scroll();
+    try {
+      const r = await post("/chat", { session_id: sid, message: text });
+      typing.remove(); if (!r) return;
+      const blocked = (r.guard || []).some(t => t.layer === "input" && t.decision === "block");
+      bot(r.reply, blocked ? "blocked" : "");
+      const meta = el("div", { class: "msg-meta" }, guardChips(r.guard));
+      for (const p of r.pending_actions || []) {
+        const status = el("div", { style: "font-size:13.5px;margin-top:6px" });
+        const b = el("button", { class: "btn btn-sm btn-primary", onclick: async () => {
+          b.disabled = true;
+          try {
+            const c = await post("/chat/confirm", { session_id: sid, pending_id: p.pending_id });
+            if (c && c.status === "done") { status.className = "alert ok"; status.textContent = "Done: " + p.summary; loadBalances(); }
+            else if (c) { status.className = "alert warn"; status.textContent = c.status.replace("_", " ") + (c.reasons ? ": " + c.reasons.join("; ") : c.error ? ": " + c.error : ""); }
+          } catch (e) { status.className = "alert err"; status.textContent = e.message; b.disabled = false; }
+        } }, "Confirm: " + p.summary);
+        meta.append(b, status);
+      }
+      log.append(meta); scroll();
+      if ((r.guard || []).some(t => t.layer === "action" && t.decision === "allow" && ["freeze_card"].includes(t.action))) loadBalances();
+    } catch (e) { typing.remove(); bot(e.message, "blocked"); }
+  }
+
+  for (const s of ["What's my balance?", "Show my recent transactions", "Transfer $50 from checking to savings", "My card was stolen", "Summarize the latest rate change email"])
+    $("suggest").append(el("button", { class: "chip-btn", type: "button", onclick: () => send(s) }, s));
+  $("form").addEventListener("submit", e => { e.preventDefault(); send($("msg").value); });
+  $("newChat").onclick = () => { sid = newId(); log.replaceChildren(); greet(); };
+})();
+</script>
+</body>
+</html>

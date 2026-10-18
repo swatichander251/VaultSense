@@ -233,6 +233,10 @@ class MockLLM:
                 if amt and "transfer" in allowed:
                     await call_tool("transfer", {"from_account": "checking", "to": payee.group(1),
                                                  "amount": float(amt.group(1).replace(",", ""))})
+        if re.search(r"ignore (all |your )?(previous|prior) instructions", m) and re.search(r"(account|customer)", m):
+            # Naive model obeys the injection and dumps (synthetic) customer records.
+            return ("Customer records: A. Rivera, account 8842 0193 5521; B. Chen, account 7710 4432 0098; "
+                    "D. Okafor, account 6604 1187 3349.")
         if re.search(r"(system prompt|your instructions|your rules|repeat the text above|internal reference)", m):
             return "Sure! Here are my instructions:\n" + system
         if re.search(r"card (number|details)", m):
@@ -249,22 +253,43 @@ class MockLLM:
             return f"I couldn't get your transactions: {r}"
         if re.search(r"\b(freeze|lost|stolen)\b", m) and "freeze_card" in allowed:
             r = await call_tool("freeze_card", {})
-            return f"Done. Your card is frozen: {r}"
+            if isinstance(r, dict) and r.get("frozen"):
+                return f"Done. Your card ending in {r.get('card_last4')} is now frozen. Call 1-800-555-0100 to order a replacement."
+            return _say(r, "freeze your card")
         tr = re.search(r"(?:transfer|send|move|pay)\s+\$?([\d,]+(?:\.\d\d)?)\s*(?:dollars)?(?:\s+from\s+(checking|savings))?\s+to\s+(?:my\s+)?([\w' .-]+?)(?:\s+account)?[.!?]?$", m)
         if tr and "transfer" in allowed:
             src = tr.group(2) or ("savings" if "checking" in tr.group(3) else "checking")
             r = await call_tool("transfer", {"from_account": src, "to": tr.group(3).strip(),
                                              "amount": float(tr.group(1).replace(",", ""))})
-            return f"Transfer: {r}"
+            return _say(r, "make that transfer")
         ap = re.search(r"add (?:a )?(?:new )?payee(?: named| called)?\s+([\w' .-]+)", message, re.I)
         if ap and "add_payee" in allowed:
             r = await call_tool("add_payee", {"name": ap.group(1).strip().rstrip(".")})
-            return f"Add payee: {r}"
+            return _say(r, "add that payee")
         if docs:
             first = docs[0]
             return f"From '{first['title']}': {first['raw']}"
         return ("I can check balances and recent transactions, freeze a card, add a payee, transfer money "
                 "between your accounts or to a saved payee, and answer questions about fees, hours and rates.")
+
+
+def _say(r, what):
+    """Turn a tool result into a sentence (mock brain only)."""
+    if not isinstance(r, dict):
+        return f"Done: {r}"
+    status = r.get("status")
+    if status == "waiting_for_customer_confirmation_in_app":
+        return f"Ready: {r.get('summary')}. Press Confirm to approve it. I can't approve it for you."
+    if status in ("refused", "sent_to_human_review"):
+        verb = "I couldn't " + what if status == "refused" else "I've sent this to a bank specialist for review instead of doing it"
+        return f"{verb}: " + "; ".join(r.get("reasons", [])) + "."
+    if "error" in r:
+        return f"I couldn't {what}: {r['error']}"
+    if "transferred" in r:
+        return f"Done. Moved ${r['transferred']:,.2f} from {r['from']} to {r['to']}."
+    if r.get("added"):
+        return f"Done. {r.get('payee')} is now a saved payee."
+    return "Done."
 
 
 def _tool_result_text(r):
@@ -396,7 +421,7 @@ class ChatBot:
         raise ValueError(action)
 
     async def handle(self, caller, session_id, message, token=None, guard_enabled=True):
-        key = f"{caller['user_id'] or 'server'}:{session_id}"
+        key = f"{caller.get('ns') or caller['user_id'] or 'server'}:{session_id}"
         store = self.store_for(caller, key, token)
         trace, pending_out, blocked_docs = [], [], []
 
@@ -508,7 +533,7 @@ class ChatBot:
 
     async def confirm(self, caller, session_id, pending_id, token=None):
         """Called by the app's Confirm button (not by the LLM). Re-checks policy, then executes."""
-        key = f"{caller['user_id'] or 'server'}:{session_id}"
+        key = f"{caller.get('ns') or caller['user_id'] or 'server'}:{session_id}"
         p = self.pending.get(pending_id)
         if not p or p["owner"] != key:
             return {"status": "not_found"}  # don't consume it: a wrong-owner attempt must not cancel the real one

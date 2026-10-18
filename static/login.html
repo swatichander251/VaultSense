@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Log in · VaultSense</title>
+<link rel="stylesheet" href="/static/css/vs.css">
+<script src="/config.js"></script>
+<script src="/static/vendor/supabase.js"></script>
+<script src="/static/js/common.js"></script>
+</head>
+<body>
+<header class="topbar" id="topbar"></header>
+<main class="wrap">
+  <div class="auth card card-pad">
+    <div class="tabs"><button id="tabIn" class="on" type="button">Log in</button><button id="tabUp" type="button">Sign up</button></div>
+    <h2 id="title">Welcome back</h2>
+    <p class="muted" style="margin:4px 0 22px;font-size:14px" id="subtitle">Log in to your Comets UTD Bank demo account.</p>
+    <div id="alert"></div>
+    <form id="form">
+      <label class="field hidden" id="nameField"><span>Full name</span><input class="input" id="name" autocomplete="name" maxlength="80"></label>
+      <label class="field"><span>Email</span><input class="input" id="email" type="email" autocomplete="email" required></label>
+      <label class="field"><span>Password</span><input class="input" id="password" type="password" autocomplete="current-password" minlength="6" required></label>
+      <button class="btn btn-primary btn-block" id="submit" type="submit">Log in</button>
+    </form>
+    <p class="faint" style="font-size:12.5px;margin:18px 0 0">Demo bank with synthetic accounts. New accounts start with $2,500 checking and $8,000 savings. Don't use a password you use anywhere else.</p>
+  </div>
+</main>
+<script>
+(async () => {
+  const $ = id => document.getElementById(id);
+  const { sb, el } = VS;
+  const params = new URLSearchParams(location.search);
+  const next = (params.get("next") || "/dashboard").startsWith("/") ? (params.get("next") || "/dashboard") : "/dashboard";
+  await VS.header("/login");
+  if (!sb) { $("alert").replaceChildren(el("div", { class: "alert err" }, "Login isn't configured on this server yet (missing Supabase settings).")); $("submit").disabled = true; return; }
+  if (await VS.session()) { location.href = next; return; }
+
+  let mode = params.get("mode") === "signup" ? "up" : "in";
+  function paint() {
+    $("tabIn").classList.toggle("on", mode === "in"); $("tabUp").classList.toggle("on", mode === "up");
+    $("nameField").classList.toggle("hidden", mode === "in");
+    $("title").textContent = mode === "in" ? "Welcome back" : "Create your account";
+    $("subtitle").textContent = mode === "in" ? "Log in to your Comets UTD Bank demo account." : "Sign up to get a demo bank account protected by VaultSense.";
+    $("submit").textContent = mode === "in" ? "Log in" : "Sign up";
+    $("password").autocomplete = mode === "in" ? "current-password" : "new-password";
+    $("alert").replaceChildren();
+  }
+  $("tabIn").onclick = () => { mode = "in"; paint(); };
+  $("tabUp").onclick = () => { mode = "up"; paint(); };
+  paint();
+
+  const say = (cls, text) => $("alert").replaceChildren(el("div", { class: "alert " + cls }, text));
+  $("form").addEventListener("submit", async e => {
+    e.preventDefault();
+    $("submit").disabled = true;
+    const email = $("email").value.trim(), password = $("password").value;
+    try {
+      if (mode === "in") {
+        const { error } = await sb.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        location.href = next;
+      } else {
+        const { data, error } = await sb.auth.signUp({ email, password, options: { data: { full_name: $("name").value.trim() },
+                                                       emailRedirectTo: location.origin + "/dashboard" } });
+        if (error) throw error;
+        if (data.session) location.href = "/dashboard";
+        else say("ok", "Check your email to confirm your account, then log in.");
+      }
+    } catch (err) {
+      say("err", /Invalid login/i.test(err.message) ? "Wrong email or password." : err.message);
+    }
+    $("submit").disabled = false;
+  });
+})();
+</script>
+</body>
+</html>
