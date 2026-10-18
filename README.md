@@ -4,15 +4,14 @@ This is a synthetic-data prototype, not a certified banking security product.
 
 ## How the pieces fit (team setup)
 
-    Lovable frontend ──login / save data──▶ Supabase (auth, profiles, cards, transactions)
+     frontend ──login / save data──▶ Supabase (auth, profiles, cards, transactions)
            │
            └──POST /score + user's Supabase token──▶ this API on LinuxONE (fraud model)
 
 - The frontend never holds `VAULTSENSE_API_KEY`. It sends the logged-in user's Supabase access token;
   the API checks it with Supabase Auth before scoring.
 - `VAULTSENSE_API_KEY` is still accepted for curl, the built-in demo page at `/`, and the admin-only `/audit`.
-- CORS allows `*.lovable.app`, `*.lovableproject.com` and `*.lovable.dev` by default; add others in `ALLOWED_ORIGINS`.
-
+  
 ## Run on the LinuxONE server
 
     cd ~/vaultsense            # wherever the repo is cloned
