@@ -2,7 +2,7 @@
 
 This is a synthetic-data prototype, not a certified banking security product.
 
-## How the pieces fit (team setup)
+## Model Architecture
 
      frontend ──login / save data──▶ Supabase (auth, profiles, cards, transactions)
            │
