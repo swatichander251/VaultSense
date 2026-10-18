@@ -89,7 +89,7 @@ curl -s $API/guard/action -H "Authorization: Bearer $VAULTSENSE_API_KEY" -H 'Con
 
 `/guard/action` also runs the fraud model when you pass `transaction`, so a flagged transaction goes to human review.
 
-## Results (honest version)
+## Results 
 
 Run `python guard_eval.py --show`. Results for `guard-rules-v2`:
 
@@ -106,7 +106,7 @@ What these numbers do **not** show:
 - The known held-out false alarm is a security tip ("we'll never ask for your code") that got blocked
   when fed in as a retrieved document. It's left unfixed on purpose so the held-out number stays honest.
 
-## Next upgrades
+## Next steps:
 
 - Add a small ML classifier (e.g., a fine-tuned DeBERTa prompt-injection model) as a second opinion
   next to the rules, and combine the scores.
