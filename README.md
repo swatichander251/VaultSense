@@ -2,6 +2,72 @@
 
 This is a synthetic-data prototype, not a certified banking security product.
 
+## How the pieces fit (team setup)
+
+    Lovable frontend ──login / save data──▶ Supabase (auth, profiles, cards, transactions)
+           │
+           └──POST /score + user's Supabase token──▶ this API on LinuxONE (fraud model)
+
+- The frontend never holds `VAULTSENSE_API_KEY`. It sends the logged-in user's Supabase access token;
+  the API checks it with Supabase Auth before scoring.
+- `VAULTSENSE_API_KEY` is still accepted for curl, the built-in demo page at `/`, and the admin-only `/audit`.
+- CORS allows `*.lovable.app`, `*.lovableproject.com` and `*.lovable.dev` by default; add others in `ALLOWED_ORIGINS`.
+
+## Run on the LinuxONE server
+
+    cd ~/vaultsense            # wherever the repo is cloned
+    python3 -m venv .venv && source .venv/bin/activate
+    pip install -r requirements-dev.txt
+    cp .env.example .env       # then fill it in (keys, SUPABASE_URL, SUPABASE_ANON_KEY)
+    python -m pytest -q test_app.py
+    set -a; source .env; set +a
+    uvicorn app:app --host 127.0.0.1 --port 8080 --no-access-log
+
+Keep it on 127.0.0.1 and expose it with an HTTPS tunnel (Lovable pages are HTTPS and browsers block calls to
+plain-HTTP APIs). Example with Cloudflare Tunnel, in a second terminal:
+
+    cloudflared tunnel --url http://127.0.0.1:8080
+
+The printed `https://....trycloudflare.com` URL is the API base URL for Lovable. It changes each restart;
+use a named tunnel for a permanent URL. If no prebuilt cloudflared exists for s390x (`uname -m`), build it
+with Go: `go install github.com/cloudflare/cloudflared/cmd/cloudflared@latest`.
+
+To keep it running after you log out, use `tmux`/`screen`, or a systemd service.
+
+## Chatbot guard (prompt injection + AI-assisted attacks)
+
+`guard.py` + the `/guard/input`, `/guard/output`, `/guard/action` endpoints protect a bank chatbot.
+See **CHATBOT_GUARD.md** for the threats covered, the integration flow, a system-prompt template and
+honest evaluation results (`python guard_eval.py --show`).
+
+## Real datasets (IBM TabFormer, ULB, PaySim, BAF) and simulated banks
+
+**DATA_RUNBOOK.md** has every command, in order, to run on the server:
+`prepare_data.py` (TabFormer -> model features, leak-free), `train.py --csv` (live model, chronological split, age/income
+fairness), `benchmarks.py ulb|paysim|baf` (rare events, transfer scams, BAF fairness), `federated.py` (4 simulated banks
+sharing only aggregates). `/model` and `/results` expose the outcomes to the website; data never leaves the server.
+`test_pipeline.py` runs the whole pipeline on fake files in each dataset's exact format.
+
+## Demo bank chatbot + security dashboard
+
+- `POST /chat` runs a demo bank assistant where every message, document, tool call and reply goes through the guard.
+  `POST /chat/confirm` is the app's Confirm button for transfers/new payees (the AI can't press it).
+- Works with no AI key (`LLM_PROVIDER=mock`), or set `LLM_PROVIDER=openai|anthropic` + `LLM_API_KEY` + `LLM_MODEL`.
+- The page at `/` has a chat panel with a "Guard on" switch: turn it off to show the poisoned-email attack stealing $480.
+- Guard events are written to Supabase `guard_events` (metadata only) when `SUPABASE_SERVICE_ROLE_KEY` is set.
+- **LOVABLE_PROMPTS.md** has ready-to-paste prompts for the chat page and the admin security dashboard.
+
+## Supabase
+
+Run these in order in the Supabase SQL editor (all safe to re-run):
+1. `supabase_migration_0_base.sql` (profiles, cards, transactions; skip if you already ran the first setup script)
+2. `supabase_migration.sql` (model columns, profile trigger, guard_events)
+3. `supabase_migration_2_chatbot.sql` (demo accounts and payees, locked-down transfer functions, server-only fraud
+   fields, security admins, dashboard views)
+
+`bash db_tests/run.sh` runs 25 security tests against a throwaway local Postgres (e.g. customer A can't see B's
+data, customers can't edit balances or fraud scores, only the server can move money).
+
 ## Local quick start (Python 3.11+, Bash)
 
 python -m venv .venv
@@ -39,7 +105,22 @@ Code Engine is the functional demo host, NOT evidence of IBM Z Secure Execution.
 
 ## Training and datasets
 
-The included model is trained with pure-Python stochastic-gradient logistic regression on 7,000 generated synthetic records. Run python train.py to reproduce. The test split contains 1,400 records. Read evaluation.json: recall is low at the illustrative 0.25 threshold. This is an honest baseline, not a competitive fraud detector. Threshold selection should use a separate validation set, then evaluate on a held-out chronological test set. Report PR-AUC, recall at a fixed false-positive rate, cost-weighted errors and measured p50/p95/p99 end-to-end latency.
+The included model (logistic-v2) is logistic regression trained to convergence with Newton's method (pure Python)
+on 7,000 synthetic records, split 60/20/20 into train / validation / test. Thresholds are chosen on the validation set by
+false-positive budget, then measured on the untouched test set. Run `python train.py` to reproduce
+(`--review-fpr 0.05` for a smaller review queue).
+
+| Test set (1,401 rows, 61 fraud) | v1 | v2 review line (`threshold`) | v2 high-risk line (`high_threshold`) |
+|---|---|---|---|
+| Recall | 0.15 | 0.48 (95% CI 0.36-0.60) | 0.11 |
+| Precision | 0.50 | 0.19 | 0.32 |
+| False-positive rate | 0.6% | 9.0% | 1.1% |
+
+The model's ROC-AUC (0.79) matches the ceiling set by the formula that generated the data (0.80), so on these five
+features more recall can only come from a lower threshold, at the cost of more false alarms. Real gains need more
+signals (device, login location, the customer's usual amounts, payee age). v1 also under-weighted amount by about 15x;
+a $9,000 transfer to a new payee now scores 0.44 (high) instead of 0.05. `/score` returns `risk_level`
+(low / review / high).
 
 To bring your own dataset:
 python train.py --csv normalized.csv
@@ -51,10 +132,14 @@ Use amount in consistent monetary units; hour 0-23; binary values 0/1; age for e
 
 GET / : demo form
 GET /health : explicitly states hardware protection is not verified
-POST /score : authenticated score, threshold decision, exact additive log-odds contributions, inference-only elapsed milliseconds
-GET /audit : authenticated last 1,000 volatile HMAC-linked event records
+POST /score : authenticated (API key or Supabase user token) score, threshold decision, exact additive log-odds contributions, inference-only elapsed milliseconds
+POST /guard/input, /guard/output, /guard/action : chatbot guard layers (see CHATBOT_GUARD.md)
+POST /chat, /chat/confirm : demo bank chatbot behind the guard
+POST /transactions/{id}/score : score a saved Supabase transaction; server writes the result
+POST /guard/unlock : admin API key only; unlock a session after human review
+GET /audit : admin API key only; last 1,000 volatile HMAC-linked event records
 
-No full transaction features are intentionally written by the app to disk or audit records. Pydantic error responses can include invalid submitted values; use only synthetic input, suppress/transform validation detail before production, and review ingress and platform logs. Response data and alert metadata remain sensitive. Python does not guarantee memory zeroization; no code-only claim of encrypted memory is made. No TLS or attestation is implemented by the app; use the cloud HTTPS endpoint for this demo.
+No full transaction features are intentionally written by the app to disk or audit records. Validation errors list only the invalid field names, not the submitted values; still use only synthetic input and review ingress and platform logs. Response data and alert metadata remain sensitive. Python does not guarantee memory zeroization; no code-only claim of encrypted memory is made. No TLS or attestation is implemented by the app; use the cloud HTTPS endpoint for this demo.
 
 The HMAC chain can detect some changes only when a verifier has a trusted prior checkpoint and the secret remains secure. A privileged holder of the audit key can rewrite it. It is NOT tamper-proof, immutable storage, hardware attestation or proof that data was never exposed. Do not use the single shared demo key across multiple banks.
 

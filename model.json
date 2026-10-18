@@ -1,12 +1,23 @@
 {
   "weights": [
-    0.17710649613201102,
-    0.10677170902435072,
-    1.370250218170502,
-    1.7736317598377223,
-    2.1457815875541044
+    1.7622858997636954,
+    0.4311285518403713,
+    1.5171912675014063,
+    1.9070389973185735,
+    2.044695483604849
   ],
-  "bias": -5.208489060529772,
-  "threshold": 0.25,
-  "version": "logistic-demo-v1"
+  "bias": -5.688270864251893,
+  "threshold": 0.11147709695781885,
+  "high_threshold": 0.25301346239156824,
+  "version": "logistic-v2",
+  "trained_on": "synthetic",
+  "split": "stratified random 60/20/20",
+  "trained_at": "2026-10-17",
+  "test_summary": {
+    "recall": 0.475,
+    "false_positive_rate": 0.0903,
+    "roc_auc": 0.791,
+    "test_fraud_cases": 61
+  },
+  "threshold_note": "threshold = review line at <= 10% validation false-positive rate; high_threshold at <= 1%"
 }

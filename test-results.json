@@ -1,3 +1,9 @@
 {
-  "API_integration_test": "unavailable"
+  "API_integration_test": "passed",
+  "api_tests": 37,
+  "db_security_tests": 25,
+  "command": "python -m pytest -q test_app.py test_pipeline.py && bash db_tests/run.sh",
+  "guard_eval": "python guard_eval.py --show",
+  "date": "2026-10-17",
+  "pipeline_tests": 6
 }

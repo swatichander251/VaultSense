@@ -1,24 +1,149 @@
 {
+  "model_version": "logistic-v2",
+  "dataset": "synthetic",
+  "split": "stratified random 60/20/20",
+  "rows": {
+    "train": 4199,
+    "validation": 1400,
+    "test": 1401
+  },
   "test": {
-    "n": 1400,
-    "fraud_count": 52,
-    "precision": 0.5,
-    "recall": 0.15384615384615385,
-    "false_positive_rate": 0.005934718100890208
+    "n": 1401,
+    "fraud_count": 61,
+    "roc_auc": 0.791,
+    "pr_auc": 0.224,
+    "review_operating_point": {
+      "threshold": 0.1115,
+      "recall": 0.475,
+      "recall_95ci": [
+        0.355,
+        0.598
+      ],
+      "precision": 0.193,
+      "false_positive_rate": 0.0903,
+      "caught": 29,
+      "missed": 32,
+      "false_alarms": 121
+    },
+    "high_risk_operating_point": {
+      "threshold": 0.253,
+      "recall": 0.115,
+      "recall_95ci": [
+        0.057,
+        0.218
+      ],
+      "precision": 0.318,
+      "false_positive_rate": 0.0112,
+      "caught": 7,
+      "missed": 54,
+      "false_alarms": 15
+    }
   },
   "under_60": {
-    "n": 810,
-    "fraud_count": 30,
-    "precision": 0.45454545454545453,
-    "recall": 0.16666666666666666,
-    "false_positive_rate": 0.007692307692307693
+    "n": 805,
+    "fraud_count": 33,
+    "roc_auc": 0.852,
+    "pr_auc": 0.311,
+    "review_operating_point": {
+      "threshold": 0.1115,
+      "recall": 0.545,
+      "recall_95ci": [
+        0.38,
+        0.702
+      ],
+      "precision": 0.212,
+      "false_positive_rate": 0.0868,
+      "caught": 18,
+      "missed": 15,
+      "false_alarms": 67
+    },
+    "high_risk_operating_point": {
+      "threshold": 0.253,
+      "recall": 0.212,
+      "recall_95ci": [
+        0.107,
+        0.378
+      ],
+      "precision": 0.438,
+      "false_positive_rate": 0.0117,
+      "caught": 7,
+      "missed": 26,
+      "false_alarms": 9
+    }
   },
   "age_60_plus": {
-    "n": 590,
-    "fraud_count": 22,
-    "precision": 0.6,
-    "recall": 0.13636363636363635,
-    "false_positive_rate": 0.0035211267605633804
+    "n": 596,
+    "fraud_count": 28,
+    "roc_auc": 0.718,
+    "pr_auc": 0.146,
+    "review_operating_point": {
+      "threshold": 0.1115,
+      "recall": 0.393,
+      "recall_95ci": [
+        0.236,
+        0.576
+      ],
+      "precision": 0.169,
+      "false_positive_rate": 0.0951,
+      "caught": 11,
+      "missed": 17,
+      "false_alarms": 54
+    },
+    "high_risk_operating_point": {
+      "threshold": 0.253,
+      "recall": 0.0,
+      "recall_95ci": [
+        0.0,
+        0.121
+      ],
+      "precision": 0.0,
+      "false_positive_rate": 0.0106,
+      "caught": 0,
+      "missed": 28,
+      "false_alarms": 6
+    }
   },
-  "note": "Synthetic random-split demonstration, not deployment validation. Age is excluded from scoring. Threshold is illustrative, not tuned."
+  "fairness_at_review_threshold": {
+    "age": {
+      "under_60": {
+        "n": 805,
+        "fraud": 33,
+        "recall": 0.545,
+        "recall_95ci": [
+          0.38,
+          0.702
+        ],
+        "false_positive_rate": 0.0868
+      },
+      "60_plus": {
+        "n": 596,
+        "fraud": 28,
+        "recall": 0.393,
+        "recall_95ci": [
+          0.236,
+          0.576
+        ],
+        "false_positive_rate": 0.0951
+      },
+      "fpr_ratio_min_over_max": 0.913
+    }
+  },
+  "ceiling_true_generating_formula_on_test": {
+    "roc_auc": 0.799,
+    "pr_auc": 0.212,
+    "at_same_false_positive_budget": {
+      "threshold": 0.1084,
+      "recall": 0.541,
+      "recall_95ci": [
+        0.417,
+        0.66
+      ],
+      "precision": 0.21,
+      "false_positive_rate": 0.0925,
+      "caught": 33,
+      "missed": 28,
+      "false_alarms": 124
+    }
+  },
+  "note": "Thresholds chosen on validation, metrics on test. Age and income are never model inputs; they are used only to compare groups. Small fraud counts make group differences uncertain: read the 95% intervals."
 }
