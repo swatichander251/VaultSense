@@ -110,10 +110,15 @@ IBM Cloud Hyper Protect Virtual Servers for VPC is deprecated: no new instances 
 
 No federated learning, secure aggregation, differential privacy, regulator access, customer notifications or real banking integration is implemented. Sharing model updates is not automatically private. Add these only with an explicit threat model and privacy controls. Alert explanations are predictive, not proof of fairness or causation; compliance needs jurisdiction-specific assessment.
 
-## Official documentation
+## Official documentation/Datasets/Sources
 
 https://cloud.ibm.com/docs/codeengine?topic=codeengine-cli
 https://cloud.ibm.com/docs/codeengine?topic=codeengine-secret
 https://www.ibm.com/products/confidential-computing-container-runtime
 https://www.ibm.com/docs/en/linux-on-systems?topic=execution-introduction
 https://cloud.ibm.com/docs/vpc?topic=vpc-financial-transaction-confidential-computing-on-hyper-protect-virtual-server-for-vpc
+https://github.com/IBM/TabFormer
+https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud
+https://www.kaggle.com/datasets/ealaxi/paysim1
+https://www.kaggle.com/datasets/sgpjesus/bank-account-fraud-dataset-neurips-2022
+
