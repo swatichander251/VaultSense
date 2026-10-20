@@ -12,22 +12,6 @@ This is a synthetic-data prototype, not a certified banking security product.
   the API checks it with Supabase Auth before scoring.
 - `VAULTSENSE_API_KEY` is still accepted for curl, the built-in demo page at `/`, and the admin-only `/audit`.
   
-## Run on the LinuxONE server
-
-    cd ~/vaultsense            # wherever the repo is cloned
-    python3 -m venv .venv && source .venv/bin/activate
-    pip install -r requirements-dev.txt
-    cp .env.example .env       # then fill it in (keys, SUPABASE_URL, SUPABASE_ANON_KEY)
-    python -m pytest -q test_app.py
-    set -a; source .env; set +a
-    uvicorn app:app --host 127.0.0.1 --port 8080 --no-access-log
-    cloudflared tunnel --url http://127.0.0.1:8080
-
-The printed `https://....trycloudflare.com` URL is the API base URL for Lovable. It changes each restart;
-use a named tunnel for a permanent URL. If no prebuilt cloudflared exists for s390x (`uname -m`), build it
-with Go: `go install github.com/cloudflare/cloudflared/cmd/cloudflared@latest`.
-
-To keep it running after you log out, use `tmux`/`screen`, or a systemd service.
 
 ## Chatbot guard (prompt injection + AI-assisted attacks)
 
@@ -76,41 +60,6 @@ Run these in order in the Supabase SQL editor (all safe to re-run):
 `bash db_tests/run.sh` runs 25 security tests against a throwaway local Postgres (e.g. customer A can't see B's
 data, customers can't edit balances or fraud scores, only the server can move money).
 
-## Local quick start (Python 3.11+, Bash)
-
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-export VAULTSENSE_API_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')
-export VAULTSENSE_AUDIT_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')
-uvicorn app:app --host 127.0.0.1 --port 8080 --no-access-log
-
-Open http://localhost:8080. In another shell with the same API key:
-
-curl http://localhost:8080/score -H "Authorization: Bearer $VAULTSENSE_API_KEY" -H 'Content-Type: application/json' -d '{"amount":1800,"hour":2,"international":1,"new_payee":1,"velocity_10m":18}'
-
-The browser token stays in the page input, not localStorage. Use synthetic data only. Never expose the local HTTP server to public traffic.
-
-## IBM Cloud connection / deployment
-
-Prerequisites: IBM Cloud account, CLI installed, permissions and a resource group, billing approval as applicable. Run from the extracted project directory. These commands create potentially billable resources; they have NOT been run by this project author.
-
-ibmcloud login
-ibmcloud target -r us-south -g YOUR_RESOURCE_GROUP
-ibmcloud plugin install code-engine
-ibmcloud ce project create --name vaultsense-demo
-ibmcloud ce project select --name vaultsense-demo
-
-Generate the two secrets as in local quick start, then:
-
-ibmcloud ce secret create --name vaultsense-secrets --from-literal VAULTSENSE_API_KEY="$VAULTSENSE_API_KEY" --from-literal VAULTSENSE_AUDIT_KEY="$VAULTSENSE_AUDIT_KEY"
-ibmcloud ce application create --name vaultsense --build-source . --build-strategy dockerfile --port 8080 --env-from-secret vaultsense-secrets --min-scale 1 --max-scale 1
-ibmcloud ce application get --name vaultsense
-
-Use the HTTPS application URL printed by IBM Cloud. The UI and /score endpoint are on this server. Do not place an IBM Cloud IAM key in the UI. The application bearer token is separate from the IBM Cloud login. Secret values passed on the command line may be visible to local privileged users; use a trusted workstation. For production use managed identity, per-bank authorization, rate limits and managed secret rotation.
-
-Code Engine is the functional demo host, NOT evidence of IBM Z Secure Execution. A successful deployment does not verify confidential computing. Minimum scale one reduces cold starts but can incur continuous charges. Audit records are ephemeral and reset on restart; max scale one does not make them durable.
-
 ## Training and datasets
 
 The included model (logistic-v2) is logistic regression trained to convergence with Newton's method (pure Python)
@@ -130,8 +79,6 @@ signals (device, login location, the customer's usual amounts, payee age). v1 al
 a $9,000 transfer to a new payee now scores 0.44 (high) instead of 0.05. `/score` returns `risk_level`
 (low / review / high).
 
-To bring your own dataset:
-python train.py --csv normalized.csv
 
 Required numeric CSV columns: amount,hour,international,new_payee,velocity_10m,age,is_fraud
 Use amount in consistent monetary units; hour 0-23; binary values 0/1; age for evaluation only. Define velocity_10m as a count calculated using only earlier events for the same pseudonymous account. Do NOT invent unavailable attributes or derive them using future transactions. This starter does not include adapters or download TabFormer, ULB, PaySim or BAF. ULB's anonymized features do not directly fit this schema: use a separate feature pipeline/model. Age and income are not accepted by /score. Income fairness evaluation is not implemented. Synthetic age groups do not validate fairness on real populations. Differences in subgroup rates require sample-size/uncertainty analysis and legal review.
@@ -151,7 +98,7 @@ No full transaction features are intentionally written by the app to disk or aud
 
 The HMAC chain can detect some changes only when a verifier has a trusted prior checkpoint and the secret remains secure. A privileged holder of the audit key can rewrite it. It is NOT tamper-proof, immutable storage, hardware attestation or proof that data was never exposed. Do not use the single shared demo key across multiple banks.
 
-## IBM Z / LinuxONE confidential deployment: separate next stage
+## IBM Z / LinuxONE seperate deployment:
 
 Use the same API application in an IBM Secure Execution-enabled guest on supported IBM Z/LinuxONE infrastructure, with IBM's supported confidential-container tooling. Build an s390x-compatible image and validate dependencies. Example build only:
 docker buildx build --platform linux/s390x -t YOUR_REGISTRY/vaultsense:z-demo --push .
