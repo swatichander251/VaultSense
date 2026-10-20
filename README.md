@@ -21,10 +21,6 @@ This is a synthetic-data prototype, not a certified banking security product.
     python -m pytest -q test_app.py
     set -a; source .env; set +a
     uvicorn app:app --host 127.0.0.1 --port 8080 --no-access-log
-
-Keep it on 127.0.0.1 and expose it with an HTTPS tunnel (Lovable pages are HTTPS and browsers block calls to
-plain-HTTP APIs). Example with Cloudflare Tunnel, in a second terminal:
-
     cloudflared tunnel --url http://127.0.0.1:8080
 
 The printed `https://....trycloudflare.com` URL is the API base URL for Lovable. It changes each restart;
@@ -39,7 +35,7 @@ To keep it running after you log out, use `tmux`/`screen`, or a systemd service.
 See **CHATBOT_GUARD.md** for the threats covered, the integration flow, a system-prompt template and
 honest evaluation results (`python guard_eval.py --show`).
 
-## Website (served by the API, no Lovable needed)
+## Website 
 
 | Page | What it does |
 |---|---|
@@ -55,7 +51,7 @@ In Supabase → Authentication → URL Configuration, set the Site URL to your H
 
 ## Real datasets (IBM TabFormer, ULB, PaySim, BAF) and simulated banks
 
-**DATA_RUNBOOK.md** has every command, in order, to run on the server:
+
 `prepare_data.py` (TabFormer -> model features, leak-free), `train.py --csv` (live model, chronological split, age/income
 fairness), `benchmarks.py ulb|paysim|baf` (rare events, transfer scams, BAF fairness), `federated.py` (4 simulated banks
 sharing only aggregates). `/model` and `/results` expose the outcomes to the website; data never leaves the server.
@@ -68,7 +64,6 @@ sharing only aggregates). `/model` and `/results` expose the outcomes to the web
 - Works with no AI key (`LLM_PROVIDER=mock`), or set `LLM_PROVIDER=openai|anthropic` + `LLM_API_KEY` + `LLM_MODEL`.
 - The page at `/` has a chat panel with a "Guard on" switch: turn it off to show the poisoned-email attack stealing $480.
 - Guard events are written to Supabase `guard_events` (metadata only) when `SUPABASE_SERVICE_ROLE_KEY` is set.
-- **LOVABLE_PROMPTS.md** has ready-to-paste prompts for the chat page and the admin security dashboard.
 
 ## Supabase
 
