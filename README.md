@@ -1,4 +1,4 @@
-# VaultSense: runnable datathon starter
+# VaultSense
 
 This is a synthetic-data prototype, not a certified banking security product.
 LINK TO DEMO: https://vaultsense-utd.duckdns.org
